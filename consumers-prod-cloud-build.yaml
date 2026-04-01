@@ -1,0 +1,45 @@
+steps:
+    # Get deploy keys from Google Cloud Secrets Manager
+    - name: 'gcr.io/cloud-builders/gcloud'
+      id: GetDeployKeys
+      entrypoint: 'bash'
+      args:
+          - '-c'
+          - |
+              gcloud secrets versions access latest --secret=EXPRESS-LOGGERJS-DEPLOY-KEY > express_loggerjs_deploy_key
+              gcloud secrets versions access latest --secret=EXPRESS-UTILS-DEPLOY-KEYS > express_utils_deploy_key
+    # build the container image
+    - name: 'gcr.io/cloud-builders/docker'
+      args:
+          [
+              'build',
+              '-t',
+              'asia-south1-docker.pkg.dev/plum-vpc-prod/plum-docker-repo/emp-exp-consumer-master-worker:$SHORT_SHA',
+              '-f',
+              'Dockerfile.consumers',
+              '.',
+          ]
+      # push container image
+    - name: 'gcr.io/cloud-builders/docker'
+      args:
+          [
+              'push',
+              'asia-south1-docker.pkg.dev/plum-vpc-prod/plum-docker-repo/emp-exp-consumer-master-worker:$SHORT_SHA',
+          ]
+    - name: 'gcr.io/cloud-builders/gcloud'
+      id: Replace the container image tag in kubernetes deployment file
+      entrypoint: /bin/sh
+      args:
+          - '-c'
+          - |
+              sed -i "s/IMAGE_TAG/$SHORT_SHA/g" deployments/master-worker.yaml
+      # deploy container image to GKE
+    - name: 'gcr.io/cloud-builders/gke-deploy'
+      args:
+          - run
+          - --filename=deployments/master-worker.yaml
+          - --location=asia-south1
+          - --cluster=plum-prod-cluster-2
+options:
+    pool:
+        name: 'projects/plum-vpc-prod/locations/asia-south1/workerPools/plum-cloud-build-worker-pool'
